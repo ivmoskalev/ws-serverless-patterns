@@ -1,0 +1,15 @@
+{
+  "name": "api-users",
+  "version": "1.0.0",
+  "description": "API users resource",
+  "main": "index.ts",
+  "license": "MIT",
+  "scripts": {
+    "lint": "estlint '*.ts' --quite --fix",
+    "compile": "tsc",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.119"
+  }
+}
