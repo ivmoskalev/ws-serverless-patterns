@@ -56,8 +56,20 @@ export class WsServerlessPatternsStack extends Stack {
       description: 'Lambda function used to perform actions on the users data',
       value: usersFunction.functionName,
     });
+
+    const authorizerFunction = new lambda_nodejs.NodejsFunction(this, 'authorizer-function', {
+      entry: './src/api/authorizer/index.ts',
+      handler: 'handler',
+      ...nodejsFunctionProps,
+    });
+    Tags.of(authorizerFunction).add('Stack', `${Aws.STACK_NAME}`);
+
+    const authorizer = new apigateway.TokenAuthorizer(this, 'api-authorizer', {
+      handler: authorizerFunction,
+    });
     
     const api = new apigateway.RestApi(this, 'users-api', {
+      defaultMethodOptions: { authorizer },
       deployOptions: {
         stageName: 'prod',
         tracingEnabled: true,
@@ -98,6 +110,7 @@ export class WsServerlessPatternsStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
     Tags.of(userPool).add('Name', `${Aws.STACK_NAME}-user-pool`);
+    authorizerFunction.addEnvironment('USER_POOL_ID', userPool.userPoolId);
 
     const apiAdminGroupName = new CfnParameter(this, 'api-admin-group-name', {
       description: 'User pool group name for API adminstrators',
@@ -127,6 +140,7 @@ export class WsServerlessPatternsStack extends Stack {
     });
 
     const userPoolClientId = userPoolClient.userPoolClientId;
+    authorizerFunction.addEnvironment('APPLICATION_CLIENT_ID', userPoolClientId);
 
     userPool.addDomain('user-pool-domain', {
       cognitoDomain: {
@@ -140,6 +154,7 @@ export class WsServerlessPatternsStack extends Stack {
       precedence: 0,
       userPoolId: userPool.userPoolId,
     }); 
+    authorizerFunction.addEnvironment('ADMIN_GROUP_NAME', adminGroup.groupName || '');
 
     new CfnOutput(this, 'UserPool', {
       description: 'Cognito User Pool ID',
