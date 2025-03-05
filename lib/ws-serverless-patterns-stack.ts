@@ -3,6 +3,7 @@
 import {
   Aws,
   CfnOutput,
+  CfnParameter,
   Duration,
   RemovalPolicy,
   Stack,
@@ -12,6 +13,7 @@ import {
 import { Construct } from 'constructs';
 
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as lambda_nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
@@ -77,5 +79,91 @@ export class WsServerlessPatternsStack extends Stack {
     user.addMethod('DELETE', new apigateway.LambdaIntegration(usersFunction));
     user.addMethod('GET', new apigateway.LambdaIntegration(usersFunction));
     user.addMethod('PUT', new apigateway.LambdaIntegration(usersFunction));
-  }
+
+    const userPool = new cognito.UserPool(this, 'user-pool', {
+      userPoolName: `${Aws.STACK_NAME}-user-pool`,
+      selfSignUpEnabled: true,
+      signInAliases: { email: true },
+      autoVerify: { email: true },
+      standardAttributes: {
+        email: {
+          required: true,
+          mutable: true,
+        },
+        fullname: {
+          required: true,
+          mutable: true,
+        },
+      },
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    Tags.of(userPool).add('Name', `${Aws.STACK_NAME}-user-pool`);
+
+    const apiAdminGroupName = new CfnParameter(this, 'api-admin-group-name', {
+      description: 'User pool group name for API adminstrators',
+      type: 'String',
+      default: 'apiAdmins',
+    });
+
+    const userPoolClient = userPool.addClient('user-pool-client', {
+      userPoolClientName: `${Aws.STACK_NAME}-user-pool-client`,
+      authFlows: {
+        userPassword: true,
+        userSrp: true,
+      },
+      preventUserExistenceErrors: true,
+      refreshTokenValidity: Duration.days(30),
+      supportedIdentityProviders: [cognito.UserPoolClientIdentityProvider.COGNITO],
+      oAuth: {
+        flows: {
+          authorizationCodeGrant: true,
+        },
+        scopes: [ 
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.OPENID 
+        ],
+        callbackUrls: [ 'http://localhost' ],
+      }
+    });
+
+    const userPoolClientId = userPoolClient.userPoolClientId;
+
+    userPool.addDomain('user-pool-domain', {
+      cognitoDomain: {
+        domainPrefix: `${userPoolClientId}`,
+      }
+    });
+
+    const adminGroup = new cognito.CfnUserPoolGroup(this, 'api-admin-group', {
+      description: 'User group for API Administrators',
+      groupName: apiAdminGroupName.valueAsString,
+      precedence: 0,
+      userPoolId: userPool.userPoolId,
+    }); 
+
+    new CfnOutput(this, 'UserPool', {
+      description: 'Cognito User Pool ID',
+      value: userPool.userPoolId,
+    });
+
+    new CfnOutput(this, 'UserPoolClient', {
+      description: 'Cognito User Pool Application Client ID',
+      value: userPoolClientId,
+    });
+
+    new CfnOutput(this, 'UserPoolAdminGroupName ', {
+      description: 'Cognito User Pool Admin Group Name',
+      value: adminGroup.groupName || '',
+    });
+
+    new CfnOutput(this, 'CognitoLoginURL', {
+      description: 'Cognito User Pool Application Client Hosted Login UI URL',
+      value: `https://${userPoolClientId}.auth.${Aws.REGION}.amazoncognito.com/login?client_id=${userPoolClientId}&response_type=code&redirect_uri=http://localhost`
+    });
+
+    new CfnOutput(this, 'CognitoAuthCommand', {
+      description: 'AWS CLI command for Amazon Cognito User Pool authentication',
+      value: `aws cognito-idp initiate-auth --auth-flow USER_PASSWORD_AUTH --client-id ${userPoolClientId} --auth-parameters USERNAME=<user@example.com>,PASSWORD=<password>`
+    });
+  }  
 }
